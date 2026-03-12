@@ -312,12 +312,5 @@ Week 23-24: ¥300,000+   （全フェーズ稼働）
 
 ---
 
-## リンク
-
-- **現行B2BサービスLP：** [colega.jp](https://colega.jp)
-- **GitHub Issues（スプリント管理）：** [github.com/Beeeing/colega/issues](https://github.com/Beeeing/colega/issues)
-- **LINE公式アカウント：** [lin.ee/YAoQueN](https://lin.ee/YAoQueN)
-
----
 
 *最終更新：2026年3月 / 作成：Colega B2Cプロジェクトチーム*

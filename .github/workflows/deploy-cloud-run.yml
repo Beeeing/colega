@@ -1,0 +1,79 @@
+# Cloud Run 自動デプロイ（main ブランチへの push 時）
+#
+# 必要な GitHub 設定:
+#   Variables（Settings → Secrets and variables → Actions → Variables）:
+#     GCP_PROJECT_ID              … GCP プロジェクト ID
+#     GCP_REGION                  … 例: asia-northeast1
+#     CLOUD_RUN_SERVICE           … Cloud Run サービス名（例: colega）
+#     ARTIFACT_REGISTRY_REPOSITORY … Artifact Registry の Docker リポジトリ名
+#   Secrets:
+#     WIF_PROVIDER                … Workload Identity プロバイダー（projects/.../providers/...）
+#     WIF_SERVICE_ACCOUNT         … デプロイ用 SA メール（例: github-deploy@....iam.gserviceaccount.com）
+#
+# GCP 側の準備（初回のみ、ローカルで gcloud 実行）:
+#   1. API 有効化: run, artifactregistry, iamcredentials
+#   2. Artifact Registry に Docker リポジトリ作成（名前は ARTIFACT_REGISTRY_REPOSITORY と一致）
+#   3. デプロイ用サービスアカウントに付与:
+#        roles/run.admin, roles/artifactregistry.writer, roles/iam.serviceAccountUser
+#      （Cloud Run の実行 SA に対する Service Account User が必要な場合あり）
+#   4. Workload Identity Pool + OIDC プロバイダー（GitHub）を作成し、
+#      上記 SA に「プリンシパルセット: repo:Beeeing/colega:ref:refs/heads/main」をバインド
+#   詳細: https://github.com/google-github-actions/auth#setting-up-workload-identity-federation
+
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-cloud-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      AR_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+
+    steps:
+      - name: Check required variables
+        run: |
+          test -n "$PROJECT_ID" || { echo "Set GitHub variable GCP_PROJECT_ID"; exit 1; }
+          test -n "$REGION" || { echo "Set GitHub variable GCP_REGION"; exit 1; }
+          test -n "$SERVICE" || { echo "Set GitHub variable CLOUD_RUN_SERVICE"; exit 1; }
+          test -n "$AR_REPOSITORY" || { echo "Set GitHub variable ARTIFACT_REGISTRY_REPOSITORY"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/${SERVICE}:${GITHUB_SHA}"
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE }}
